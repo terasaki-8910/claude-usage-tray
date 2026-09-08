@@ -33,7 +33,7 @@
   },
   "build": {
     "appId": "io.github.terasaki8910.claude-usage-tray",
-    "productName": "Claude Usage Tray",
+    "productName": "UsageTray",
     "directories": {
       "output": "release"
     },

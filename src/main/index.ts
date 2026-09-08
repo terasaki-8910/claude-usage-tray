@@ -1,6 +1,7 @@
 import { app, ipcMain } from 'electron'
 import { bucketToDto } from '../core/usage-parser'
 import { checkGuards } from '../core/budget-guard'
+import { bucketKeyForReason, resetMoved } from '../core/ping-confirm'
 import { decide } from '../core/scheduler-logic'
 import type { Config, LedgerEntry, PopupState } from '../core/types'
 import { resolveClaudePath } from './claude-cli'
@@ -59,7 +60,7 @@ function buildPopupState(): PopupState {
 async function firePing(reason: string): Promise<void> {
   const claudePath = resolveClaudePath()
   const ts = Date.now()
-  const beforeBucket = reason === 'session' ? usageStore.getSnapshot().session : usageStore.getSnapshot().weeklyAll
+  const beforeBucket = usageStore.getSnapshot()[bucketKeyForReason(reason)]
 
   if (!claudePath) {
     ledger.append({
@@ -107,18 +108,19 @@ async function firePing(reason: string): Promise<void> {
 /** Polls after a ping to confirm resetsAt actually moved — refresh was
  * measured to be asynchronous with unknown latency, so this does not
  * assume the cache is fresh the instant the CLI process exits. */
-async function confirmPing(ts: number, reason: 'session' | string): Promise<void> {
+async function confirmPing(ts: number, reason: string): Promise<void> {
   const entry = ledger.getEntries().find((e) => e.ts === ts)
   const beforeMs = entry?.resetsAtBeforeMs ?? null
+  const bucketKey = bucketKeyForReason(reason)
 
   for (const delay of CONFIRM_POLL_DELAYS_MS) {
     await sleep(delay)
     const { changed } = usageStore.refresh()
     if (!changed) continue
     const snap = usageStore.getSnapshot()
-    const after = reason === 'session' ? snap.session : snap.weeklyAll
+    const after = snap[bucketKey]
     const afterMs = after?.resetsAt?.getTime() ?? null
-    const moved = afterMs !== null && afterMs !== beforeMs
+    const moved = resetMoved(beforeMs, afterMs)
     ledger.updateByTs(ts, { resetsAtAfterMs: afterMs, confirmed: moved })
     tray?.update(snap)
     popup?.pushState()

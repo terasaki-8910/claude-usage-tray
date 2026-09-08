@@ -268,6 +268,10 @@ footer {
   opacity: 0.6;
 }
 
+.fetched-at.is-stale {
+  color: var(--warning);
+}
+
 .ping-message {
   font-size: 11.5px;
   color: var(--fg-secondary);

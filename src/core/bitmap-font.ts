@@ -134,3 +134,41 @@ export function renderTrayIcon(text: string, opts: TrayIconOptions): RenderedIco
 
   return { width: size, height: size, buffer: canvas.buffer }
 }
+
+/**
+ * Draws a radial burst mark for the macOS menu bar.
+ *
+ * macOS is not subject to the 16x16 "one legible thing" constraint that
+ * forces Windows to choose between a logo and digits: there the icon and
+ * `Tray.setTitle` text sit side by side, so the mark can carry identity
+ * while the title carries the number.
+ *
+ * Returned as a black + alpha template image — macOS inverts template
+ * images automatically for light and dark menu bars, so it must not
+ * carry its own colors.
+ */
+export function renderBurstMark(size: number): RenderedIcon {
+  const canvas = new Canvas(size, TRANSPARENT)
+  const black: RgbaColor = [0, 0, 0, 255]
+  const c = (size - 1) / 2
+  const inner = size * 0.14
+  const outer = size * 0.46
+  const thickness = Math.max(1, Math.round(size / 14))
+
+  for (let i = 0; i < 8; i++) {
+    const angle = (Math.PI / 4) * i
+    const dx = Math.cos(angle)
+    const dy = Math.sin(angle)
+    for (let r = inner; r <= outer; r += 0.25) {
+      const x = c + dx * r
+      const y = c + dy * r
+      for (let ox = 0; ox < thickness; ox++) {
+        for (let oy = 0; oy < thickness; oy++) {
+          canvas.set(Math.round(x) + ox, Math.round(y) + oy, black)
+        }
+      }
+    }
+  }
+
+  return { width: size, height: size, buffer: canvas.buffer }
+}

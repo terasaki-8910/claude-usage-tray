@@ -1,6 +1,6 @@
 import { Menu, nativeImage, screen, Tray, type Rectangle } from 'electron'
 import { platform } from 'node:os'
-import { renderTrayIcon, type RgbaColor } from '../core/bitmap-font'
+import { renderBurstMark, renderTrayIcon, type RgbaColor } from '../core/bitmap-font'
 import { formatPercentGlyphs } from '../core/icon-text'
 import type { Bucket, Snapshot } from '../core/types'
 
@@ -45,7 +45,7 @@ export class AppTray {
   private lastKey: string | null = null
 
   constructor(onLeftClick: () => void, onQuit: () => void) {
-    this.tray = new Tray(this.renderIcon('--', COLORS.unknown))
+    this.tray = new Tray(platform() === 'darwin' ? this.macIcon() : this.renderIcon('--', COLORS.unknown))
     this.tray.on('click', onLeftClick)
     this.tray.on('right-click', () => {
       const menu = Menu.buildFromTemplate([
@@ -55,6 +55,22 @@ export class AppTray {
       ])
       this.tray.popUpContextMenu(menu)
     })
+  }
+
+  /** macOS shows an icon AND the `setTitle` text side by side, so unlike
+   * Windows it can carry a mark as well as the number. The previous
+   * `nativeImage.createEmpty()` left the menu bar item looking blank or
+   * broken whenever the title was empty too. Rendered at 2x and tagged as
+   * a template image so macOS inverts it for light and dark menu bars. */
+  private macIcon(): Electron.NativeImage {
+    const rendered = renderBurstMark(32)
+    const img = nativeImage.createFromBuffer(rendered.buffer, {
+      width: rendered.width,
+      height: rendered.height,
+      scaleFactor: 2
+    })
+    img.setTemplateImage(true)
+    return img
   }
 
   private renderIcon(glyphs: string, fg: RgbaColor): Electron.NativeImage {
@@ -78,7 +94,9 @@ export class AppTray {
     if (platform() === 'darwin') {
       const key = glyphs
       if (key !== this.lastKey) {
-        this.tray.setTitle(glyphs === '--' ? '' : `${glyphs}%`, { fontType: 'monospacedDigit' })
+        // "--" rather than an empty title: alongside the burst icon it
+        // reads as "no data" instead of looking like a broken item.
+        this.tray.setTitle(glyphs === '--' ? '--' : `${glyphs}%`, { fontType: 'monospacedDigit' })
         this.lastKey = key
       }
     } else {

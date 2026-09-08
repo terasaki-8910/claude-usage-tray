@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { renderTrayIcon } from './bitmap-font'
+import { renderBurstMark, renderTrayIcon } from './bitmap-font'
 
 const FG = [255, 255, 255, 255] as const
 const ACCENT = [217, 119, 87, 255] as const
@@ -51,6 +51,38 @@ describe('renderTrayIcon — legibility at the real 16px tray size', () => {
 
   it('handles an empty string without throwing', () => {
     expect(() => renderTrayIcon('', { size: 16, fg: FG })).not.toThrow()
+  })
+})
+
+describe('renderBurstMark — macOS template icon', () => {
+  it('produces a square canvas of the requested size', () => {
+    for (const size of [16, 32, 44]) {
+      const icon = renderBurstMark(size)
+      expect(icon.width).toBe(size)
+      expect(icon.height).toBe(size)
+      expect(icon.buffer.length).toBe(size * size * 4)
+    }
+  })
+
+  it('draws opaque black pixels only — template images must carry no color', () => {
+    const icon = renderBurstMark(32)
+    let opaque = 0
+    for (let i = 0; i < icon.buffer.length; i += 4) {
+      const a = icon.buffer[i + 3]
+      if (a === 0) continue
+      opaque++
+      expect([icon.buffer[i], icon.buffer[i + 1], icon.buffer[i + 2], a]).toEqual([0, 0, 0, 255])
+    }
+    expect(opaque).toBeGreaterThan(20)
+  })
+
+  it('leaves the outer corners empty, so the mark reads as radial', () => {
+    const icon = renderBurstMark(32)
+    const cornerAlpha = (x: number, y: number): number => icon.buffer[(y * icon.width + x) * 4 + 3]
+    expect(cornerAlpha(0, 0)).toBe(0)
+    expect(cornerAlpha(31, 0)).toBe(0)
+    expect(cornerAlpha(0, 31)).toBe(0)
+    expect(cornerAlpha(31, 31)).toBe(0)
   })
 })
 

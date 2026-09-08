@@ -8,11 +8,26 @@ declare global {
   }
 }
 
-function formatResetsAt(iso: string | null): string {
-  if (!iso) return '不明'
+const STALE_AFTER_MS = 30 * 60_000
+
+function formatAge(ms: number): string {
+  const minutes = Math.floor(ms / 60_000)
+  if (minutes < 1) return '1分未満前'
+  if (minutes < 60) return `${minutes}分前`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}時間前`
+  return `${Math.floor(hours / 24)}日前`
+}
+
+/** Shows whether a reset is still ahead or already behind us. A window
+ * whose reset time has passed was rendering as "9/7 13:09 にリセット",
+ * which reads as a future event even when it is a day old. */
+function formatReset(iso: string | null): string {
+  if (!iso) return 'リセット時刻: 不明'
   const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return '不明'
-  return d.toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+  if (Number.isNaN(d.getTime())) return 'リセット時刻: 不明'
+  const stamp = d.toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+  return d.getTime() <= Date.now() ? `${stamp} にリセット済み` : `${stamp} にリセット`
 }
 
 function Row({ bucket }: { bucket: BucketDto }): preact.JSX.Element {
@@ -22,7 +37,7 @@ function Row({ bucket }: { bucket: BucketDto }): preact.JSX.Element {
         <span class="row-label">{bucket.label}</span>
         <span class={`row-percent sev-${bucket.severity}`}>{bucket.percent}%</span>
       </div>
-      <div class="row-reset">{formatResetsAt(bucket.resetsAtIso)} にリセット</div>
+      <div class="row-reset">{formatReset(bucket.resetsAtIso)}</div>
     </div>
   )
 }
@@ -83,11 +98,20 @@ export function App(): preact.JSX.Element {
 
   const handleRefresh = async (): Promise<void> => {
     setRefreshing(true)
+    const startedAt = Date.now()
     try {
       setState(await window.api.requestRefresh())
     } catch (e) {
       setError((e as Error).message)
     } finally {
+      // Re-reading the local cache takes a few milliseconds, so without a
+      // floor the spinner flashes invisibly and pressing the button feels
+      // like nothing happened.
+      const elapsed = Date.now() - startedAt
+      const MIN_SPIN_MS = 550
+      if (elapsed < MIN_SPIN_MS) {
+        await new Promise((resolve) => setTimeout(resolve, MIN_SPIN_MS - elapsed))
+      }
       setRefreshing(false)
     }
   }
@@ -114,6 +138,8 @@ export function App(): preact.JSX.Element {
   }
 
   const { pingStats } = state
+  const ageMs = state.fetchedAtMs === null ? null : Date.now() - state.fetchedAtMs
+  const isStale = ageMs === null || ageMs > STALE_AFTER_MS
 
   return (
     <div class="card">
@@ -130,8 +156,15 @@ export function App(): preact.JSX.Element {
         </button>
       </header>
 
-      {state.stale && (
+      {state.stale ? (
         <div class="stale-banner">データを取得できません。Claude Codeを一度実行してから開き直してください。</div>
+      ) : (
+        isStale && (
+          <div class="stale-banner">
+            下の数値は{ageMs === null ? '不明な時点' : formatAge(ageMs)}のもので、現在の使用量とは異なります。
+            この値はこのPCでClaude Codeが動いた時にだけ更新されます。
+          </div>
+        )
       )}
 
       {state.session && <Row bucket={state.session} />}
@@ -169,7 +202,16 @@ export function App(): preact.JSX.Element {
         {state.lastPingSummary && <div class="ping-stats">最終: {state.lastPingSummary}</div>}
 
         {state.fetchedAtMs && (
-          <div class="fetched-at">最終取得: {new Date(state.fetchedAtMs).toLocaleTimeString()}</div>
+          <div class={isStale ? 'fetched-at is-stale' : 'fetched-at'}>
+            最終取得:{' '}
+            {new Date(state.fetchedAtMs).toLocaleString('ja-JP', {
+              month: 'numeric',
+              day: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit'
+            })}
+            {ageMs !== null && ` (${formatAge(ageMs)})`}
+          </div>
         )}
       </footer>
     </div>
