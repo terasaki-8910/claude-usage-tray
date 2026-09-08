@@ -80,6 +80,14 @@ export interface BucketDto {
   label: string
 }
 
+export interface PingStats {
+  /** Pings attempted in the trailing 7 days. */
+  count7d: number
+  /** Total USD spent on those pings — the number that matters, since the
+   * whole feature exists to keep spend negligible. */
+  spend7dUsd: number
+}
+
 export interface PopupState {
   fetchedAtMs: number | null
   stale: boolean
@@ -88,4 +96,5 @@ export interface PopupState {
   weeklyFable: BucketDto | null
   pingEnabled: boolean
   lastPingSummary: string | null
+  pingStats: PingStats
 }

@@ -4,13 +4,14 @@
   "description": "Tray app that displays Claude usage-limit percentages and reactively pings to keep reset windows from drifting.",
   "private": true,
   "type": "module",
-  "author": "masa669a@gmail.com",
+  "author": "terasaki-8910",
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "build:win": "electron-vite build && electron-builder --win",
+    "build:mac": "electron-vite build && electron-builder --mac",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
@@ -31,12 +32,13 @@
     "vitest": "5.0.0"
   },
   "build": {
-    "appId": "engineering.masa669a.claude-usage-tray",
+    "appId": "io.github.terasaki8910.claude-usage-tray",
     "productName": "Claude Usage Tray",
     "directories": {
       "output": "release"
     },
     "files": ["out/**/*"],
+    "publish": [{ "provider": "github" }],
     "win": {
       "target": ["nsis"],
       "artifactName": "${productName}-Setup-${version}.${ext}"
@@ -46,6 +48,18 @@
       "allowToChangeInstallationDirectory": true,
       "perMachine": false,
       "createDesktopShortcut": false
+    },
+    "mac": {
+      "target": [
+        { "target": "dmg", "arch": ["arm64", "x64"] },
+        { "target": "zip", "arch": ["arm64", "x64"] }
+      ],
+      "category": "public.app-category.developer-tools",
+      "artifactName": "${productName}-${version}-${arch}.${ext}",
+      "identity": null,
+      "extendInfo": {
+        "LSUIElement": 1
+      }
     }
   }
 }

@@ -1,0 +1,46 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    strategy:
+      # Don't let one platform's failure cancel the other — a broken mac
+      # build shouldn't throw away a good Windows artifact.
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # 22 rather than latest: vitest's engines field excludes Node 25.
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run typecheck
+
+      - run: npm test
+
+      - run: npm run build
+
+      - name: Package and publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # electron-builder picks the host platform's targets: NSIS on
+        # Windows, dmg+zip (arm64 and x64) on macOS. The mac build is
+        # unsigned (`identity: null`) — signing needs a paid Apple
+        # Developer account, so first launch on macOS requires
+        # right-click > Open to get past Gatekeeper.
+        run: npx electron-builder --publish always

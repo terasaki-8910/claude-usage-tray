@@ -91,15 +91,17 @@ export function App(): preact.JSX.Element {
   }
 
   if (error) {
-    return <div class="loading">エラー: {error}</div>
+    return <div class="card loading">エラー: {error}</div>
   }
 
   if (!state) {
-    return <div class="loading">読み込み中…</div>
+    return <div class="card loading">読み込み中…</div>
   }
 
+  const { pingStats } = state
+
   return (
-    <div class="popup">
+    <div class="card">
       <header>
         <span class="title">Claude使用量</span>
         <button
@@ -122,7 +124,7 @@ export function App(): preact.JSX.Element {
       {state.weeklyFable && <Row bucket={state.weeklyFable} />}
 
       <footer>
-        <label class="toggle-row">
+        <label class="ping-toggle">
           <input
             type="checkbox"
             checked={state.pingEnabled}
@@ -130,9 +132,20 @@ export function App(): preact.JSX.Element {
               void window.api.setPingEnabled((e.target as HTMLInputElement).checked)
             }}
           />
-          自動ping({state.pingEnabled ? '有効' : '無効'})
+          自動ping
+          <span class="ping-state">{state.pingEnabled ? '有効' : '無効'}</span>
         </label>
-        {state.lastPingSummary && <div class="last-ping">最終ping: {state.lastPingSummary}</div>}
+
+        <p class="ping-explain">
+          使用量の枠が切れたら、Haikuに最小の1往復(約$0.001)を自動送信して新しい枠を開始します。
+          放置すると次に使った時点から枠が始まるため、リセット時刻が後ろへずれていくのを防ぐ機能です。
+        </p>
+
+        <div class="ping-stats">
+          直近7日: {pingStats.count7d}回 / ${pingStats.spend7dUsd.toFixed(4)}
+          {state.lastPingSummary && <> ・最終: {state.lastPingSummary}</>}
+        </div>
+
         {state.fetchedAtMs && (
           <div class="fetched-at">最終取得: {new Date(state.fetchedAtMs).toLocaleTimeString()}</div>
         )}

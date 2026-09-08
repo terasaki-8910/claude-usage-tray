@@ -38,7 +38,13 @@ function buildPopupState(): PopupState {
   const snap = usageStore.getSnapshot()
   const entries = ledger.getEntries()
   const last = entries[entries.length - 1] ?? null
+  const weekAgo = Date.now() - 7 * 24 * 60 * 60_000
+  const recent = entries.filter((e) => e.ts >= weekAgo)
   return {
+    pingStats: {
+      count7d: recent.length,
+      spend7dUsd: recent.reduce((sum, e) => sum + (e.costUsd ?? 0), 0)
+    },
     fetchedAtMs: snap.fetchedAtMs,
     stale: snap.stale,
     session: bucketToDto(snap.session),

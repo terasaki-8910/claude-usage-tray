@@ -1,26 +1,35 @@
 :root {
   --bg: #ffffff;
-  --fg: #1c1c1e;
-  --fg-muted: #6b6b70;
+  --fg: #17171a;
+  /* Two deliberate steps of de-emphasis rather than one washed-out grey:
+     labels stay clearly readable, meta text sits just below them. Both
+     clear WCAG AA against --row-bg at these sizes. */
+  --fg-secondary: #3d3d43;
+  --fg-tertiary: #56565e;
   --border: #e2e2e5;
-  --row-bg: #f7f7f8;
+  --row-bg: #f5f5f6;
   --accent: #1f9d55;
-  --warning: #b3720a;
+  --warning: #a8660a;
   --critical: #c62828;
-  --unknown: #8a8a8e;
+  --unknown: #6f6f76;
+  --brand: #c4603f;
+  --shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #1e1e20;
-    --fg: #f2f2f3;
-    --fg-muted: #9a9aa0;
-    --border: #38383a;
-    --row-bg: #2a2a2d;
-    --accent: #34c471;
-    --warning: #e0a530;
-    --critical: #ef5350;
-    --unknown: #98989e;
+    --bg: #1f1f22;
+    --fg: #f4f4f5;
+    --fg-secondary: #d2d2d8;
+    --fg-tertiary: #a9a9b2;
+    --border: #3a3a3d;
+    --row-bg: #2a2a2e;
+    --accent: #3fcc7c;
+    --warning: #e6a72f;
+    --critical: #f0605a;
+    --unknown: #9c9ca4;
+    --brand: #d97757;
+    --shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
   }
 }
 
@@ -28,9 +37,19 @@
   box-sizing: border-box;
 }
 
+/* The window itself is transparent; the visible card is .card. The
+   background must NOT live on html/body — a background set on body with a
+   transparent html propagates to the canvas and paints the full window
+   rectangle, ignoring body's own border-radius. That is what made the
+   popup show square corners with a rounded border line inside them. */
+html,
 body {
   margin: 0;
-  background: var(--bg);
+  background: transparent;
+}
+
+body {
+  padding: 8px;
   color: var(--fg);
   font-family:
     -apple-system,
@@ -40,14 +59,16 @@ body {
     'Hiragino Sans',
     sans-serif;
   font-size: 13px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  overflow: hidden;
   -webkit-user-select: none;
   user-select: none;
 }
 
-.popup {
+.card {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   padding: 10px 12px 12px;
@@ -55,27 +76,27 @@ body {
 }
 
 .loading {
-  padding: 24px;
+  padding: 20px;
   text-align: center;
-  color: var(--fg-muted);
+  color: var(--fg-secondary);
 }
 
 header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding-bottom: 4px;
 }
 
 .title {
   font-weight: 600;
   font-size: 13px;
+  color: var(--fg);
 }
 
 .icon-button {
   border: none;
   background: transparent;
-  color: var(--fg-muted);
+  color: var(--fg-secondary);
   cursor: pointer;
   padding: 4px;
   border-radius: 6px;
@@ -87,6 +108,11 @@ header {
 .icon-button:hover:not(:disabled) {
   background: var(--row-bg);
   color: var(--fg);
+}
+
+.icon-button:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 1px;
 }
 
 .icon-button:disabled {
@@ -112,9 +138,9 @@ header {
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 8px;
-  color: var(--fg-muted);
+  color: var(--fg-secondary);
   font-size: 12px;
-  line-height: 1.4;
+  line-height: 1.45;
 }
 
 .row {
@@ -127,17 +153,19 @@ header {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
+  gap: 8px;
 }
 
 .row-label {
   font-size: 12px;
-  color: var(--fg-muted);
+  font-weight: 500;
+  color: var(--fg-secondary);
 }
 
 .row-percent {
   font-variant-numeric: tabular-nums;
-  font-weight: 600;
-  font-size: 15px;
+  font-weight: 700;
+  font-size: 16px;
 }
 
 .row-percent.sev-normal {
@@ -154,29 +182,55 @@ header {
 }
 
 .row-reset {
-  margin-top: 2px;
-  font-size: 11px;
-  color: var(--fg-muted);
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--fg-tertiary);
 }
 
 footer {
   border-top: 1px solid var(--border);
-  padding-top: 8px;
+  padding-top: 9px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 
-.toggle-row {
+.ping-toggle {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
   font-size: 12px;
+  font-weight: 500;
+  color: var(--fg-secondary);
   cursor: pointer;
 }
 
-.last-ping,
+.ping-toggle input {
+  margin: 0;
+  cursor: pointer;
+  accent-color: var(--brand);
+}
+
+.ping-state {
+  font-weight: 400;
+  color: var(--fg-tertiary);
+}
+
+.ping-explain {
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--fg-tertiary);
+  margin: 0;
+}
+
+.ping-stats {
+  font-size: 11.5px;
+  color: var(--fg-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
 .fetched-at {
-  font-size: 11px;
-  color: var(--fg-muted);
+  font-size: 11.5px;
+  color: var(--fg-tertiary);
+  font-variant-numeric: tabular-nums;
 }
