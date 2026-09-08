@@ -1,46 +1,51 @@
 import { Menu, nativeImage, screen, Tray, type Rectangle } from 'electron'
 import { platform } from 'node:os'
-import { renderGlyphs, type RgbaColor } from '../core/bitmap-font'
+import { renderTrayIcon, type RgbaColor } from '../core/bitmap-font'
 import { formatPercentGlyphs } from '../core/icon-text'
 import type { Bucket, Snapshot } from '../core/types'
 
-// One accent color for the "normal" state, per ui.md — neutrals/greys for
-// unknown, and two clearly distinct signal colors for warning/critical
-// severities, mapped directly from the data's own `severity` field rather
-// than a percent threshold we'd have to invent and keep in sync.
+/** Claude's brand coral, drawn as a 2px bar along the bottom of the tray
+ * icon. At the real 16x16 tray size there is no room for both a legible
+ * two-digit number and a recognizable logo, so identity is carried by a
+ * persistent color cue instead of a shape. */
+const BRAND: RgbaColor = [217, 119, 87, 255]
+
+// Severity comes straight from the data's own `severity` field rather
+// than percent thresholds we'd have to invent and keep in sync.
 const COLORS: Record<string, RgbaColor> = {
-  normal: [46, 160, 67, 255],
-  warning: [212, 136, 6, 255],
-  critical: [209, 43, 43, 255],
-  unknown: [130, 130, 130, 255]
+  normal: [64, 190, 105, 255],
+  warning: [230, 160, 30, 255],
+  critical: [235, 80, 70, 255],
+  unknown: [150, 150, 150, 255]
 }
+
+/** Past this age the cached numbers are too old to present as current. */
+const STALE_AFTER_MS = 30 * 60_000
 
 function colorForSeverity(severity: string | undefined): RgbaColor {
   return COLORS[severity ?? ''] ?? COLORS.unknown
 }
 
-function windowsRenderOptions(fg: RgbaColor): { scale: number; fg: RgbaColor; bg: RgbaColor } {
-  // Electron's Windows tray is pinned to the default DPI (electron#33044,
-  // still open) — it won't pick a scaled variant itself, so this reads the
-  // real scale factor and renders at that pixel size directly.
-  const scaleFactor = screen.getPrimaryDisplay().scaleFactor
-  const scale = Math.max(1, Math.round((16 * scaleFactor) / 7))
-  return { scale, fg, bg: [0, 0, 0, 0] }
+/** Tray icons are square and fixed-size on Windows (SM_CXSMICON = 16 at
+ * 100% DPI). Render at exactly that many device pixels so Electron never
+ * rescales — rescaling a non-square render is what previously turned
+ * "03" into an unreadable blob. */
+function trayIconSize(): number {
+  const scaleFactor = screen.getPrimaryDisplay().scaleFactor || 1
+  return Math.max(16, Math.round(16 * scaleFactor))
 }
 
 function formatResetsAt(b: Bucket | null): string {
-  if (!b) return '不明'
-  if (!b.resetsAt) return '不明'
+  if (!b?.resetsAt) return '不明'
   return b.resetsAt.toLocaleString()
 }
 
 export class AppTray {
   private readonly tray: Tray
-  private lastGlyphs: string | null = null
-  private lastColorKey: string | null = null
+  private lastKey: string | null = null
 
   constructor(onLeftClick: () => void, onQuit: () => void) {
-    this.tray = new Tray(this.placeholderIcon())
+    this.tray = new Tray(this.renderIcon('--', COLORS.unknown))
     this.tray.on('click', onLeftClick)
     this.tray.on('right-click', () => {
       const menu = Menu.buildFromTemplate([
@@ -52,42 +57,44 @@ export class AppTray {
     })
   }
 
-  private placeholderIcon(): Electron.NativeImage {
-    if (platform() === 'darwin') {
-      return nativeImage.createEmpty()
-    }
-    const rendered = renderGlyphs('--', windowsRenderOptions(COLORS.unknown))
-    return nativeImage.createFromBuffer(rendered.buffer, { width: rendered.width, height: rendered.height })
+  private renderIcon(glyphs: string, fg: RgbaColor): Electron.NativeImage {
+    const size = trayIconSize()
+    const rendered = renderTrayIcon(glyphs, { size, fg, accent: BRAND })
+    return nativeImage.createFromBuffer(rendered.buffer, {
+      width: rendered.width,
+      height: rendered.height,
+      scaleFactor: 1
+    })
   }
 
   update(snap: Snapshot): void {
     const primary = snap.session
-    const glyphs = formatPercentGlyphs(primary?.percent)
-    const color = colorForSeverity(primary?.severity)
-    const colorKey = color.join(',')
+    const ageMs = snap.fetchedAtMs === null ? Number.POSITIVE_INFINITY : Date.now() - snap.fetchedAtMs
+    const isStale = snap.stale || ageMs > STALE_AFTER_MS
+
+    const glyphs = isStale ? '--' : formatPercentGlyphs(primary?.percent)
+    const fg = isStale ? COLORS.unknown : colorForSeverity(primary?.severity)
 
     if (platform() === 'darwin') {
-      if (glyphs !== this.lastGlyphs) {
+      const key = glyphs
+      if (key !== this.lastKey) {
         this.tray.setTitle(glyphs === '--' ? '' : `${glyphs}%`, { fontType: 'monospacedDigit' })
-        this.lastGlyphs = glyphs
+        this.lastKey = key
       }
-    } else if (glyphs !== this.lastGlyphs || colorKey !== this.lastColorKey) {
-      const rendered = renderGlyphs(glyphs, windowsRenderOptions(color))
-      this.tray.setImage(
-        nativeImage.createFromBuffer(rendered.buffer, {
-          width: rendered.width,
-          height: rendered.height,
-          scaleFactor: 1
-        })
-      )
-      this.lastGlyphs = glyphs
-      this.lastColorKey = colorKey
+    } else {
+      // Redraw only when the visible result actually changes — cheap
+      // insurance against tray handle churn on a 5-minute timer.
+      const key = `${glyphs}|${fg.join(',')}`
+      if (key !== this.lastKey) {
+        this.tray.setImage(this.renderIcon(glyphs, fg))
+        this.lastKey = key
+      }
     }
 
-    this.tray.setToolTip(this.buildTooltip(snap))
+    this.tray.setToolTip(this.buildTooltip(snap, isStale))
   }
 
-  private buildTooltip(snap: Snapshot): string {
+  private buildTooltip(snap: Snapshot, isStale: boolean): string {
     const lines: string[] = ['CLAUDE使用量']
     for (const b of [snap.session, snap.weeklyAll, snap.weeklyFable]) {
       if (!b) continue
@@ -97,7 +104,9 @@ export class AppTray {
       lines.push(`最終取得: ${new Date(snap.fetchedAtMs).toLocaleTimeString()}`)
     }
     if (snap.stale) {
-      lines.push('(データが取得できません — Claude Codeを一度実行してください)')
+      lines.push('データが読めません — Claude Codeを一度実行してください')
+    } else if (isStale) {
+      lines.push('データが古い可能性があります(30分以上前)')
     }
     return lines.join('\n')
   }

@@ -1,69 +1,75 @@
 import { describe, expect, it } from 'vitest'
-import { renderGlyphs } from './bitmap-font'
+import { renderTrayIcon } from './bitmap-font'
 
 const FG = [255, 255, 255, 255] as const
-const BG = [0, 0, 0, 0] as const
+const ACCENT = [217, 119, 87, 255] as const
 
-describe('renderGlyphs — dimensions', () => {
-  it('computes width from character count, scale, and the 1px gap', () => {
-    const one = renderGlyphs('6', { scale: 2, fg: FG, bg: BG })
-    expect(one.width).toBe(5 * 2) // no gap for a single glyph
-    expect(one.height).toBe(7 * 2)
+function pixelAt(icon: ReturnType<typeof renderTrayIcon>, x: number, y: number): number[] {
+  const i = (y * icon.width + x) * 4
+  return [icon.buffer[i], icon.buffer[i + 1], icon.buffer[i + 2], icon.buffer[i + 3]]
+}
 
-    const two = renderGlyphs('65', { scale: 2, fg: FG, bg: BG })
-    expect(two.width).toBe(5 * 2 + 1 * 2 + 5 * 2) // glyph + gap + glyph
-    expect(two.height).toBe(7 * 2)
-  })
-
-  it('produces a buffer of exactly width*height*4 bytes', () => {
-    const icon = renderGlyphs('65', { scale: 3, fg: FG, bg: BG })
-    expect(icon.buffer.length).toBe(icon.width * icon.height * 4)
-  })
-
-  it('never throws on an empty string, and returns a positive-size buffer', () => {
-    const icon = renderGlyphs('', { scale: 2, fg: FG, bg: BG })
-    expect(icon.width).toBeGreaterThan(0)
-    expect(icon.height).toBeGreaterThan(0)
-    expect(() => renderGlyphs('', { scale: 2, fg: FG, bg: BG })).not.toThrow()
-  })
-
-  it('never throws on an unrecognized character, rendering a blank cell', () => {
-    expect(() => renderGlyphs('6?', { scale: 2, fg: FG, bg: BG })).not.toThrow()
-    const icon = renderGlyphs('?', { scale: 2, fg: FG, bg: BG })
-    // Every pixel should be background since '?' has no glyph.
-    for (let i = 0; i < icon.buffer.length; i += 4) {
-      expect(icon.buffer[i + 3]).toBe(BG[3])
+describe('renderTrayIcon — square canvas invariant', () => {
+  // This is THE regression guard: a non-square icon gets rescaled by
+  // Windows into the 16x16 tray slot, which squashed "03" into an
+  // unreadable blob that read as "00".
+  it('is always exactly size x size, whatever the text', () => {
+    for (const text of ['0', '03', '99', '--', '', '7']) {
+      for (const size of [16, 20, 24, 32]) {
+        const icon = renderTrayIcon(text, { size, fg: FG })
+        expect(icon.width).toBe(size)
+        expect(icon.height).toBe(size)
+        expect(icon.buffer.length).toBe(size * size * 4)
+      }
     }
+  })
+
+  it('never draws outside the canvas', () => {
+    const icon = renderTrayIcon('88', { size: 16, fg: FG })
+    expect(icon.buffer.length).toBe(16 * 16 * 4)
   })
 })
 
-describe('renderGlyphs — pixel content', () => {
-  it('draws the "-" glyph as a single horizontal bar on its middle row', () => {
-    const icon = renderGlyphs('-', { scale: 1, fg: FG, bg: BG })
-    // '-' pattern: only row index 3 (0-based) is '11111', all others blank.
-    for (let row = 0; row < 7; row++) {
-      for (let col = 0; col < 5; col++) {
-        const idx = (row * icon.width + col) * 4
-        const isForeground = icon.buffer[idx] === FG[0] && icon.buffer[idx + 3] === FG[3]
-        expect(isForeground).toBe(row === 3)
-      }
-    }
+describe('renderTrayIcon — legibility at the real 16px tray size', () => {
+  it('renders two distinct digits differently (0 vs 3 must not collide)', () => {
+    const zero = renderTrayIcon('00', { size: 16, fg: FG })
+    const three = renderTrayIcon('03', { size: 16, fg: FG })
+    expect(Buffer.compare(zero.buffer, three.buffer)).not.toBe(0)
   })
 
-  it('scales a lit pixel into an NxN block of foreground color', () => {
-    const scale = 4
-    const icon = renderGlyphs('-', { scale, fg: FG, bg: BG })
-    // Row 3, col 0 of the base glyph is lit -> the whole scaled block at
-    // (0..3, 12..15) should be foreground.
-    for (let sy = 0; sy < scale; sy++) {
-      for (let sx = 0; sx < scale; sx++) {
-        const x = 0 * scale + sx
-        const y = 3 * scale + sy
-        const idx = (y * icon.width + x) * 4
-        expect([icon.buffer[idx], icon.buffer[idx + 1], icon.buffer[idx + 2], icon.buffer[idx + 3]]).toEqual([
-          ...FG
-        ])
-      }
-    }
+  it('draws foreground pixels for a digit', () => {
+    const icon = renderTrayIcon('8', { size: 16, fg: FG })
+    const lit = [...icon.buffer].filter((_, i) => i % 4 === 3 && icon.buffer[i] === 255).length
+    expect(lit).toBeGreaterThan(0)
+  })
+
+  it('leaves unknown characters blank instead of throwing', () => {
+    expect(() => renderTrayIcon('?', { size: 16, fg: FG })).not.toThrow()
+    const icon = renderTrayIcon('?', { size: 16, fg: FG })
+    for (let i = 3; i < icon.buffer.length; i += 4) expect(icon.buffer[i]).toBe(0)
+  })
+
+  it('handles an empty string without throwing', () => {
+    expect(() => renderTrayIcon('', { size: 16, fg: FG })).not.toThrow()
+  })
+})
+
+describe('renderTrayIcon — accent bar', () => {
+  it('paints the bottom rows with the accent color, stored as BGRA', () => {
+    // The literal byte order is asserted on purpose: Chromium bitmaps are
+    // BGRA_8888, and writing RGBA instead rendered Claude's coral accent
+    // as blue on screen. Hardcoding the expected bytes keeps a future
+    // "fix" back to RGBA from silently regressing the color.
+    const size = 16
+    const icon = renderTrayIcon('03', { size, fg: FG, accent: ACCENT })
+    const expectedBgra = [ACCENT[2], ACCENT[1], ACCENT[0], ACCENT[3]]
+    expect(pixelAt(icon, 0, size - 1)).toEqual(expectedBgra)
+    expect(pixelAt(icon, size - 1, size - 1)).toEqual(expectedBgra)
+  })
+
+  it('leaves the bottom transparent when no accent is given', () => {
+    const size = 16
+    const icon = renderTrayIcon('03', { size, fg: FG })
+    expect(pixelAt(icon, 0, size - 1)[3]).toBe(0)
   })
 })

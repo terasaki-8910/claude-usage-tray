@@ -6,7 +6,12 @@ import type { PopupState } from '../core/types'
 const dirName = fileURLToPath(new URL('.', import.meta.url))
 
 const POPUP_WIDTH = 320
-const POPUP_HEIGHT = 240
+/** Starting height only — the renderer measures its real content and the
+ * window is resized to fit (see `resizeToContent`). Content height varies
+ * with the stale banner and last-ping line, so a fixed height clips the
+ * footer. */
+const POPUP_INITIAL_HEIGHT = 260
+const POPUP_MAX_HEIGHT = 600
 
 /**
  * Owns the popup's lifecycle. Memory-frugality requirement: the window is
@@ -16,8 +21,28 @@ const POPUP_HEIGHT = 240
  */
 export class PopupWindowManager {
   private window: BrowserWindow | null = null
+  private anchor: Rectangle | null = null
 
   constructor(private readonly getState: () => PopupState) {}
+
+  /** Windows opens the popup upward from the tray; macOS drops it down
+   * from the menu bar. Recomputed on resize so the window stays pinned to
+   * the tray edge as its height changes. */
+  private yFor(height: number): number {
+    const a = this.anchor
+    if (!a) return 0
+    return process.platform === 'darwin' ? a.y + a.height + 4 : a.y - height - 4
+  }
+
+  /** Resizes the popup to the height the renderer measured, so the footer
+   * is never clipped by a guessed fixed height. */
+  resizeToContent(webContentsId: number, contentHeight: number): void {
+    const win = this.window
+    if (!win || win.isDestroyed() || win.webContents.id !== webContentsId) return
+    const height = Math.min(POPUP_MAX_HEIGHT, Math.max(120, Math.ceil(contentHeight)))
+    if (win.getBounds().height === height) return
+    win.setBounds({ x: win.getBounds().x, y: this.yFor(height), width: POPUP_WIDTH, height })
+  }
 
   isOpen(): boolean {
     return this.window !== null
@@ -42,13 +67,13 @@ export class PopupWindowManager {
   }
 
   private open(anchorBounds: Rectangle): void {
+    this.anchor = anchorBounds
     const x = Math.round(anchorBounds.x + anchorBounds.width / 2 - POPUP_WIDTH / 2)
-    const y =
-      process.platform === 'darwin' ? anchorBounds.y + anchorBounds.height + 4 : anchorBounds.y - POPUP_HEIGHT - 4
+    const y = this.yFor(POPUP_INITIAL_HEIGHT)
 
     const win = new BrowserWindow({
       width: POPUP_WIDTH,
-      height: POPUP_HEIGHT,
+      height: POPUP_INITIAL_HEIGHT,
       x,
       y,
       show: false,
@@ -60,9 +85,10 @@ export class PopupWindowManager {
       fullscreenable: false,
       skipTaskbar: true,
       alwaysOnTop: true,
+      transparent: true,
       backgroundColor: '#00000000',
       webPreferences: {
-        preload: join(dirName, '../preload/index.mjs'),
+        preload: join(dirName, '../preload/index.cjs'),
         sandbox: true,
         contextIsolation: true
       }

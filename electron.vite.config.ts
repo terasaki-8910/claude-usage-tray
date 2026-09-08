@@ -19,6 +19,15 @@ export default defineConfig({
       rollupOptions: {
         input: {
           index: resolve(__dirname, 'src/preload/index.ts')
+        },
+        // Sandboxed preload scripts must be CommonJS — Electron cannot load
+        // an ESM preload while `sandbox: true`. With `"type": "module"` in
+        // package.json the file also needs the .cjs extension to be parsed
+        // as CJS. Emitting .mjs here silently produced no `window.api` at
+        // all, which showed up as a popup stuck on "読み込み中…".
+        output: {
+          format: 'cjs',
+          entryFileNames: '[name].cjs'
         }
       }
     }

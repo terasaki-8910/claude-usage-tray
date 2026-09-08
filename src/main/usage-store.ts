@@ -41,13 +41,16 @@ export class UsageStore {
       }
       const text = readFileSync(this.filePath, 'utf8')
       const parsed = parseUsageFile(text)
-      this.lastMtimeMs = stat.mtimeMs
       if (parsed.stale) {
         // Torn read (the CLI rewrites this file wholesale) or an
         // unrecognized shape — keep the last-known-good snapshot rather
-        // than flashing the UI to an empty/unknown state.
+        // than flashing the UI to an empty/unknown state. Deliberately do
+        // NOT record mtime here: doing so would make the next poll
+        // short-circuit on an unchanged mtime and permanently skip the
+        // now-complete file, freezing the UI on stale data.
         return { snapshot: this.snapshot, changed: false }
       }
+      this.lastMtimeMs = stat.mtimeMs
       this.snapshot = parsed
       return { snapshot: this.snapshot, changed: true }
     } catch {

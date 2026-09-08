@@ -1,28 +1,41 @@
 /**
- * A hand-rolled 5x7 monospace bitmap font for digits and '-', used to draw
- * the Windows tray icon's live percentage numeral. Zero dependencies on
- * purpose: pulling in a canvas/Skia library just to draw two digits would
- * add a native binary (packaging risk, `asarUnpack`) and resident memory
- * that directly fight this app's memory-frugality requirement. macOS gets
- * the equivalent via `Tray.setTitle`, which needs no rasterization at all.
+ * Hand-rolled bitmap glyphs for the Windows tray icon's live percentage.
+ * Zero dependencies on purpose: a canvas/Skia library would add a native
+ * binary (packaging risk, `asarUnpack`) and resident memory just to draw
+ * two digits. macOS gets the equivalent free via `Tray.setTitle`.
+ *
+ * HARD CONSTRAINT: the Windows tray slot is square and small —
+ * `GetSystemMetrics(SM_CXSMICON)` is 16 at 100% DPI (verified on the
+ * target machine). Anything non-square handed to `tray.setImage` is
+ * rescaled to fit that square, which distorts glyphs badly: an earlier
+ * 22x14 render was squashed to 16x16 and "03" became an unreadable blob
+ * that read as "00". So every render here produces a SQUARE canvas of
+ * exactly the requested size, and the glyph metrics are chosen to fit it
+ * without any rescaling.
+ *
+ * At 16x16 there is only room for one legible thing. Two digits at 3x7
+ * scaled 2x fill 14x14, leaving 2 rows for a brand accent bar — a Claude
+ * logo AND readable digits do not both fit at this size.
  */
 
-const GLYPH_WIDTH = 5
-const GLYPH_HEIGHT = 7
+const GLYPH_W = 3
+const GLYPH_H = 7
 const GLYPH_GAP = 1
 
+/** 3x7 seven-segment-style digits — chosen over a 5x7 face because two
+ * 5-wide glyphs cannot fit a 16px square without rescaling. */
 const FONT: Record<string, readonly string[]> = {
-  '0': ['01110', '10001', '10011', '10101', '11001', '10001', '01110'],
-  '1': ['00100', '01100', '00100', '00100', '00100', '00100', '01110'],
-  '2': ['01110', '10001', '00001', '00010', '00100', '01000', '11111'],
-  '3': ['11111', '00010', '00100', '00010', '00001', '10001', '01110'],
-  '4': ['00010', '00110', '01010', '10010', '11111', '00010', '00010'],
-  '5': ['11111', '10000', '11110', '00001', '00001', '10001', '01110'],
-  '6': ['00110', '01000', '10000', '11110', '10001', '10001', '01110'],
-  '7': ['11111', '00001', '00010', '00100', '01000', '01000', '01000'],
-  '8': ['01110', '10001', '10001', '01110', '10001', '10001', '01110'],
-  '9': ['01110', '10001', '10001', '01111', '00001', '00010', '01100'],
-  '-': ['00000', '00000', '00000', '11111', '00000', '00000', '00000']
+  '0': ['111', '101', '101', '101', '101', '101', '111'],
+  '1': ['010', '110', '010', '010', '010', '010', '111'],
+  '2': ['111', '001', '001', '111', '100', '100', '111'],
+  '3': ['111', '001', '001', '111', '001', '001', '111'],
+  '4': ['101', '101', '101', '111', '001', '001', '001'],
+  '5': ['111', '100', '100', '111', '001', '001', '111'],
+  '6': ['111', '100', '100', '111', '101', '101', '111'],
+  '7': ['111', '001', '001', '010', '010', '010', '010'],
+  '8': ['111', '101', '101', '111', '101', '101', '111'],
+  '9': ['111', '101', '101', '111', '001', '001', '111'],
+  '-': ['000', '000', '000', '111', '000', '000', '000']
 }
 
 export type RgbaColor = readonly [number, number, number, number]
@@ -34,53 +47,90 @@ export interface RenderedIcon {
   buffer: Buffer
 }
 
-export interface RenderOptions {
-  /** Integer upscale factor from the native 5x7 grid, e.g. `Math.round((16 * scaleFactor) / GLYPH_HEIGHT)`. */
-  scale: number
+export interface TrayIconOptions {
+  /** Square canvas edge length in px, e.g. `16 * scaleFactor`. */
+  size: number
+  /** Digit color — carries the severity signal. */
   fg: RgbaColor
-  bg: RgbaColor
+  /** Optional 2px bar along the bottom edge — a persistent brand cue that
+   * costs no digit legibility. Omit to draw digits only. */
+  accent?: RgbaColor
 }
 
-/** Renders a short string (digits and '-') into an RGBA buffer. Unknown
- * characters render as a blank cell rather than throwing — this feeds a
- * tray icon on a timer, so it must never crash the caller. */
-export function renderGlyphs(text: string, opts: RenderOptions): RenderedIcon {
-  const chars = text.split('')
-  const cellW = GLYPH_WIDTH * opts.scale
-  const cellH = GLYPH_HEIGHT * opts.scale
-  const gap = GLYPH_GAP * opts.scale
-  const width = chars.length > 0 ? chars.length * cellW + (chars.length - 1) * gap : cellW
-  const height = cellH
-  const buffer = Buffer.alloc(width * height * 4)
+class Canvas {
+  readonly buffer: Buffer
 
-  const setPixel = (x: number, y: number, color: RgbaColor): void => {
-    if (x < 0 || x >= width || y < 0 || y >= height) return
-    const idx = (y * width + x) * 4
-    buffer[idx] = color[0]
-    buffer[idx + 1] = color[1]
-    buffer[idx + 2] = color[2]
-    buffer[idx + 3] = color[3]
+  constructor(
+    readonly size: number,
+    fill: RgbaColor
+  ) {
+    this.buffer = Buffer.alloc(size * size * 4)
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) this.set(x, y, fill)
+    }
   }
 
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) setPixel(x, y, opts.bg)
+  set(x: number, y: number, c: RgbaColor): void {
+    if (x < 0 || x >= this.size || y < 0 || y >= this.size) return
+    const i = (y * this.size + x) * 4
+    // Written as BGRA, not RGBA: Chromium's bitmaps (and therefore
+    // `nativeImage.createFromBuffer`) are BGRA_8888. Writing RGBA here
+    // rendered Claude's coral accent bar as blue — green survived the
+    // swap unnoticed because it is the middle channel either way.
+    this.buffer[i] = c[2]
+    this.buffer[i + 1] = c[1]
+    this.buffer[i + 2] = c[0]
+    this.buffer[i + 3] = c[3]
   }
 
-  chars.forEach((ch, charIndex) => {
+  fillRect(x0: number, y0: number, w: number, h: number, c: RgbaColor): void {
+    for (let y = y0; y < y0 + h; y++) {
+      for (let x = x0; x < x0 + w; x++) this.set(x, y, c)
+    }
+  }
+}
+
+const TRANSPARENT: RgbaColor = [0, 0, 0, 0]
+
+/**
+ * Renders up to 2 characters (digits or '-') centered in a square canvas,
+ * with an optional 2px accent bar along the bottom. Unknown characters
+ * render blank rather than throwing — this feeds a tray icon on a timer
+ * and must never crash the caller.
+ */
+export function renderTrayIcon(text: string, opts: TrayIconOptions): RenderedIcon {
+  const size = Math.max(8, Math.floor(opts.size))
+  const canvas = new Canvas(size, TRANSPARENT)
+
+  const accentH = opts.accent ? Math.max(1, Math.round(size / 8)) : 0
+  const textAreaH = size - accentH
+
+  const chars = text.slice(0, 2).split('')
+  const baseW = chars.length * GLYPH_W + Math.max(0, chars.length - 1) * GLYPH_GAP
+
+  // Largest integer scale that fits both axes without rescaling later.
+  const scale = Math.max(1, Math.min(Math.floor(size / baseW), Math.floor(textAreaH / GLYPH_H)))
+
+  const drawnW = baseW * scale
+  const drawnH = GLYPH_H * scale
+  const originX = Math.floor((size - drawnW) / 2)
+  const originY = Math.floor((textAreaH - drawnH) / 2)
+
+  chars.forEach((ch, idx) => {
     const glyph = FONT[ch]
     if (!glyph) return
-    const originX = charIndex * (cellW + gap)
-    for (let row = 0; row < GLYPH_HEIGHT; row++) {
-      for (let col = 0; col < GLYPH_WIDTH; col++) {
+    const gx = originX + idx * (GLYPH_W + GLYPH_GAP) * scale
+    for (let row = 0; row < GLYPH_H; row++) {
+      for (let col = 0; col < GLYPH_W; col++) {
         if (glyph[row][col] !== '1') continue
-        for (let sy = 0; sy < opts.scale; sy++) {
-          for (let sx = 0; sx < opts.scale; sx++) {
-            setPixel(originX + col * opts.scale + sx, row * opts.scale + sy, opts.fg)
-          }
-        }
+        canvas.fillRect(gx + col * scale, originY + row * scale, scale, scale, opts.fg)
       }
     }
   })
 
-  return { width, height, buffer }
+  if (opts.accent && accentH > 0) {
+    canvas.fillRect(0, size - accentH, size, accentH, opts.accent)
+  }
+
+  return { width: size, height: size, buffer: canvas.buffer }
 }

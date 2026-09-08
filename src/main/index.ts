@@ -148,8 +148,10 @@ app.whenReady().then(() => {
     () => app.quit()
   )
 
+  ipcMain.handle('get-state', () => buildPopupState())
   ipcMain.handle('refresh', async () => {
     await tick(true)
+    return buildPopupState()
   })
   ipcMain.handle('set-ping-enabled', (_event, enabled: unknown) => {
     config = { ...config, pingEnabled: Boolean(enabled) }
@@ -158,6 +160,11 @@ app.whenReady().then(() => {
   })
   ipcMain.handle('quit', () => {
     app.quit()
+  })
+  ipcMain.on('report-height', (event, height: unknown) => {
+    if (typeof height === 'number' && Number.isFinite(height)) {
+      popup?.resizeToContent(event.sender.id, height)
+    }
   })
 
   void tick()

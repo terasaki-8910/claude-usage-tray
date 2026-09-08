@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'preact/hooks'
+import { useEffect, useLayoutEffect, useState } from 'preact/hooks'
 import type { BucketDto, PopupState } from '../../core/types'
 import type { PreloadApi } from '../../preload/index'
 
@@ -52,16 +52,46 @@ function RefreshIcon({ spinning }: { spinning: boolean }): preact.JSX.Element {
 export function App(): preact.JSX.Element {
   const [state, setState] = useState<PopupState | null>(null)
   const [refreshing, setRefreshing] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => window.api.onState(setState), [])
+  useEffect(() => {
+    if (!window.api) {
+      // The preload script failed to load — without this the popup would
+      // just sit on "読み込み中…" forever with no explanation.
+      setError('preloadが読み込まれていません')
+      return undefined
+    }
+    // Pull once on mount rather than relying only on the main process's
+    // push: the push can land before this listener is registered.
+    window.api
+      .getState()
+      .then(setState)
+      .catch((e: Error) => setError(e.message))
+    return window.api.onState(setState)
+  }, [])
+
+  // Report the real rendered height so the main process can size the
+  // window to it — content height changes with the stale banner and the
+  // last-ping line, and a fixed window height clipped the footer.
+  useLayoutEffect(() => {
+    if (!window.api) return
+    const height = document.body.getBoundingClientRect().height
+    if (height > 0) window.api.reportHeight(height)
+  })
 
   const handleRefresh = async (): Promise<void> => {
     setRefreshing(true)
     try {
-      await window.api.requestRefresh()
+      setState(await window.api.requestRefresh())
+    } catch (e) {
+      setError((e as Error).message)
     } finally {
       setRefreshing(false)
     }
+  }
+
+  if (error) {
+    return <div class="loading">エラー: {error}</div>
   }
 
   if (!state) {
