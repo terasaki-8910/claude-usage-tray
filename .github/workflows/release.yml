@@ -51,6 +51,7 @@ jobs:
             release/*.zip
             release/*.yml
             release/*.blockmap
+            !release/builder-debug.yml
           if-no-files-found: error
           retention-days: 7
 
