@@ -10,7 +10,7 @@ permissions:
   contents: write
 
 jobs:
-  release:
+  build:
     strategy:
       # Don't let one platform's failure cancel the other — a broken mac
       # build shouldn't throw away a good Windows artifact.
@@ -35,12 +35,66 @@ jobs:
 
       - run: npm run build
 
-      - name: Package and publish
+      # Package only — publishing happens once, in the job below. Letting
+      # both matrix jobs publish raced them into creating TWO draft
+      # releases for the same tag, splitting the Windows and macOS
+      # artifacts across them.
+      - name: Package
+        run: npx electron-builder --publish never
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.os }}
+          path: |
+            release/*.exe
+            release/*.dmg
+            release/*.zip
+            release/*.yml
+            release/*.blockmap
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -lh dist
+
+      - name: Create release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        # electron-builder picks the host platform's targets: NSIS on
-        # Windows, dmg+zip (arm64 and x64) on macOS. The mac build is
-        # unsigned (`identity: null`) — signing needs a paid Apple
-        # Developer account, so first launch on macOS requires
-        # right-click > Open to get past Gatekeeper.
-        run: npx electron-builder --publish always
+        run: |
+          gh release create "${GITHUB_REF_NAME}" dist/* \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "${GITHUB_REF_NAME}" \
+            --notes "$(cat <<'NOTES'
+          ## インストール
+
+          - **Windows**: `Claude-Usage-Tray-Setup-x.y.z.exe` を実行
+          - **macOS**: Apple Silicon は `-arm64.dmg`、Intel は `-x64.dmg`
+
+          ### macOS の初回起動について
+
+          このアプリは**未署名**です(Apple Developer Program の署名を行っていません)。
+          初回起動時は Gatekeeper に阻まれるため、アプリを**右クリック →「開く」**を選び、
+          確認ダイアログで再度「開く」を押してください。2回目以降は通常どおり起動します。
+
+          ### 使い方
+
+          トレイ/メニューバーにセッション(5時間)の使用率が常時表示されます。
+          クリックすると週間枠を含む内訳とリセット時刻が出ます。
+
+          自動ping(使用量の枠が切れた時に最小コストで新しい枠を開始する機能)は
+          **既定で無効**です。ポップアップのチェックボックスから有効化してください。
+
+          ---
+
+          Unsigned builds. On macOS, right-click the app and choose **Open** on first launch.
+          NOTES
+          )"
