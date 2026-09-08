@@ -53,6 +53,8 @@ export function App(): preact.JSX.Element {
   const [state, setState] = useState<PopupState | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [pinging, setPinging] = useState(false)
+  const [pingMessage, setPingMessage] = useState<string | null>(null)
 
   useEffect(() => {
     if (!window.api) {
@@ -87,6 +89,19 @@ export function App(): preact.JSX.Element {
       setError((e as Error).message)
     } finally {
       setRefreshing(false)
+    }
+  }
+
+  const handlePingNow = async (): Promise<void> => {
+    setPinging(true)
+    setPingMessage(null)
+    try {
+      const result = await window.api.runPingNow()
+      setPingMessage(result.message)
+    } catch (e) {
+      setPingMessage((e as Error).message)
+    } finally {
+      setPinging(false)
     }
   }
 
@@ -141,10 +156,17 @@ export function App(): preact.JSX.Element {
           放置すると次に使った時点から枠が始まるため、リセット時刻が後ろへずれていくのを防ぐ機能です。
         </p>
 
-        <div class="ping-stats">
-          直近7日: {pingStats.count7d}回 / ${pingStats.spend7dUsd.toFixed(4)}
-          {state.lastPingSummary && <> ・最終: {state.lastPingSummary}</>}
+        <div class="ping-row">
+          <span class="ping-stats">
+            直近7日: {pingStats.count7d}回 / ${pingStats.spend7dUsd.toFixed(4)}
+          </span>
+          <button class="text-button" onClick={handlePingNow} disabled={pinging}>
+            {pinging ? '送信中…' : '今すぐ1回送る'}
+          </button>
         </div>
+
+        {pingMessage && <div class="ping-message">{pingMessage}</div>}
+        {state.lastPingSummary && <div class="ping-stats">最終: {state.lastPingSummary}</div>}
 
         {state.fetchedAtMs && (
           <div class="fetched-at">最終取得: {new Date(state.fetchedAtMs).toLocaleTimeString()}</div>

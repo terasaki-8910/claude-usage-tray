@@ -1,5 +1,6 @@
 import { app, ipcMain } from 'electron'
 import { bucketToDto } from '../core/usage-parser'
+import { checkGuards } from '../core/budget-guard'
 import { decide } from '../core/scheduler-logic'
 import type { Config, LedgerEntry, PopupState } from '../core/types'
 import { resolveClaudePath } from './claude-cli'
@@ -127,6 +128,37 @@ async function confirmPing(ts: number, reason: 'session' | string): Promise<void
   popup?.pushState()
 }
 
+/**
+ * Sends one ping on explicit user request. Skips the "has a window
+ * lapsed?" test and the pingEnabled switch — the user asked for this
+ * specific send — but still honours the spend, rate and circuit-breaker
+ * guards, which exist to stop runaway cost regardless of who asked.
+ */
+async function runPingNow(): Promise<{ ok: boolean; message: string }> {
+  if (pingInFlight) return { ok: false, message: '送信中です' }
+
+  const guard = checkGuards(ledger.getEntries(), config, Date.now())
+  if (!guard.allowed) {
+    const why: Record<string, string> = {
+      debounced: '直前に送信済みのため待機中',
+      'rate-limited': '1時間あたりの上限に達しています',
+      'spend-ceiling': '1日の上限金額に達しています',
+      'circuit-open': '連続エラーのため停止中'
+    }
+    return { ok: false, message: `送信しませんでした: ${why[guard.reason ?? ''] ?? guard.reason}` }
+  }
+
+  await firePing('manual')
+
+  const entries = ledger.getEntries()
+  const entry = entries[entries.length - 1]
+  if (!entry) return { ok: false, message: '記録に失敗しました' }
+  if (entry.isError) {
+    return { ok: false, message: `失敗: ${entry.subtype ?? '不明なエラー'}` }
+  }
+  return { ok: true, message: `送信しました ($${(entry.costUsd ?? 0).toFixed(4)})` }
+}
+
 async function tick(manual = false): Promise<void> {
   const { changed } = usageStore.refresh()
   const snap = usageStore.getSnapshot()
@@ -142,6 +174,14 @@ async function tick(manual = false): Promise<void> {
 }
 
 app.whenReady().then(() => {
+  // Chromium only builds its accessibility tree on demand, which leaves
+  // the popup's controls invisible to UI Automation. Opt in explicitly so
+  // the UI can be driven by an automated check; off by default because it
+  // costs render-side work for no benefit in normal use.
+  if (process.env['CLAUDE_TRAY_A11Y'] === '1') {
+    app.setAccessibilitySupportEnabled(true)
+  }
+
   if (process.platform === 'darwin') {
     app.dock?.hide()
   }
@@ -163,6 +203,11 @@ app.whenReady().then(() => {
     config = { ...config, pingEnabled: Boolean(enabled) }
     saveConfig(config)
     popup?.pushState()
+  })
+  ipcMain.handle('run-ping-now', async () => {
+    const result = await runPingNow()
+    popup?.pushState()
+    return result
   })
   ipcMain.handle('quit', () => {
     app.quit()

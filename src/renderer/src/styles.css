@@ -234,3 +234,44 @@ footer {
   color: var(--fg-tertiary);
   font-variant-numeric: tabular-nums;
 }
+
+.ping-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.text-button {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--fg-secondary);
+  font-size: 11.5px;
+  padding: 3px 9px;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.text-button:hover:not(:disabled) {
+  background: var(--row-bg);
+  color: var(--fg);
+}
+
+.text-button:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 1px;
+}
+
+.text-button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.ping-message {
+  font-size: 11.5px;
+  color: var(--fg-secondary);
+  background: var(--row-bg);
+  border-radius: 6px;
+  padding: 5px 8px;
+}

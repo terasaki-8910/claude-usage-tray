@@ -38,6 +38,7 @@
       "output": "release"
     },
     "files": ["out/**/*"],
+    "afterPack": "build/after-pack.cjs",
     "publish": [{ "provider": "github" }],
     "win": {
       "target": ["nsis"],
