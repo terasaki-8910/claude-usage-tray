@@ -216,11 +216,59 @@ footer {
   color: var(--fg-tertiary);
 }
 
-.ping-explain {
-  font-size: 11.5px;
-  line-height: 1.5;
+.info-tip {
+  position: relative;
+  display: inline-flex;
+  margin-left: 1px;
+}
+
+.info-tip-trigger {
+  width: 13px;
+  height: 13px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: transparent;
   color: var(--fg-tertiary);
-  margin: 0;
+  font-size: 9px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: default;
+}
+
+.info-tip-trigger:hover,
+.info-tip-trigger:focus-visible {
+  border-color: var(--fg-tertiary);
+  color: var(--fg-secondary);
+  outline: none;
+}
+
+.info-tip-bubble {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 6px);
+  transform: translateX(-50%);
+  width: 216px;
+  background: var(--fg);
+  color: var(--bg);
+  font-size: 11px;
+  line-height: 1.5;
+  padding: 7px 9px;
+  border-radius: 7px;
+  box-shadow: var(--shadow);
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity 0.1s ease;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.info-tip:hover .info-tip-bubble,
+.info-tip:focus-within .info-tip-bubble {
+  visibility: visible;
+  opacity: 1;
 }
 
 .ping-stats {

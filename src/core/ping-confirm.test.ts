@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { bucketKeyForReason, resetMoved, MIN_RESET_MOVE_MS } from './ping-confirm'
+import { bucketKeyForReason, reconcilePendingPings, resetMoved, MIN_RESET_MOVE_MS } from './ping-confirm'
+import { makeBucket, makeLedgerEntry, makeSnapshot } from './test-helpers'
 
 describe('bucketKeyForReason', () => {
   it('judges a weekly-triggered ping on the weekly window', () => {
@@ -44,5 +45,74 @@ describe('resetMoved', () => {
   it('is not a restart when there is still no window', () => {
     expect(resetMoved(base, null)).toBe(false)
     expect(resetMoved(null, null)).toBe(false)
+  })
+})
+
+describe('reconcilePendingPings', () => {
+  const NOW = Date.parse('2026-09-09T00:00:00Z')
+  const BEFORE_MS = Date.parse('2026-09-08T12:00:00Z')
+  const MOVED_MS = Date.parse('2026-09-08T17:00:00Z') // +5h, a real restart
+
+  it('confirms a pending ping whose bucket reset actually moved', () => {
+    const entries = [
+      makeLedgerEntry({ ts: NOW - 60_000, status: 'success', reason: 'session', resetsAtBeforeMs: BEFORE_MS, confirmed: null })
+    ]
+    const snap = makeSnapshot({ session: makeBucket({ resetsAt: new Date(MOVED_MS) }) })
+    const patches = reconcilePendingPings(entries, snap, NOW)
+    expect(patches).toEqual([{ ts: NOW - 60_000, patch: { confirmed: true, resetsAtAfterMs: MOVED_MS } }])
+  })
+
+  it('does NOT give up early just because the cache has not refreshed yet', () => {
+    // This is the exact real-world case: 20+ minutes with no movement.
+    // Before the fix, a fixed 15s-120s window would have already reported
+    // false here. It must keep waiting until giveUpAfterMs.
+    const entries = [
+      makeLedgerEntry({ ts: NOW - 20 * 60_000, status: 'success', reason: 'session', resetsAtBeforeMs: BEFORE_MS, confirmed: null })
+    ]
+    const snap = makeSnapshot({ session: makeBucket({ resetsAt: new Date(BEFORE_MS) }) }) // unchanged
+    expect(reconcilePendingPings(entries, snap, NOW)).toEqual([])
+  })
+
+  it('gives up (confirmed:false) only after giveUpAfterMs with no movement', () => {
+    const entries = [
+      makeLedgerEntry({ ts: NOW - 31 * 60_000, status: 'success', reason: 'session', resetsAtBeforeMs: BEFORE_MS, confirmed: null })
+    ]
+    const snap = makeSnapshot({ session: makeBucket({ resetsAt: new Date(BEFORE_MS) }) })
+    const patches = reconcilePendingPings(entries, snap, NOW, 30 * 60_000)
+    expect(patches).toEqual([{ ts: NOW - 31 * 60_000, patch: { confirmed: false, resetsAtAfterMs: BEFORE_MS } }])
+  })
+
+  it('can upgrade an earlier false to true if the cache catches up late', () => {
+    const entries = [
+      makeLedgerEntry({ ts: NOW - 60_000, status: 'success', reason: 'session', resetsAtBeforeMs: BEFORE_MS, confirmed: false })
+    ]
+    const snap = makeSnapshot({ session: makeBucket({ resetsAt: new Date(MOVED_MS) }) })
+    const patches = reconcilePendingPings(entries, snap, NOW)
+    expect(patches).toEqual([{ ts: NOW - 60_000, patch: { confirmed: true, resetsAtAfterMs: MOVED_MS } }])
+  })
+
+  it('never touches an already-confirmed entry', () => {
+    const entries = [
+      makeLedgerEntry({ ts: NOW - 60_000, status: 'success', reason: 'session', resetsAtBeforeMs: BEFORE_MS, confirmed: true, resetsAtAfterMs: MOVED_MS })
+    ]
+    const snap = makeSnapshot({ session: makeBucket({ resetsAt: new Date(MOVED_MS + 999_999) }) })
+    expect(reconcilePendingPings(entries, snap, NOW)).toEqual([])
+  })
+
+  it('ignores in-flight and error entries', () => {
+    const entries = [
+      makeLedgerEntry({ ts: NOW - 60_000, status: 'in-flight', confirmed: null }),
+      makeLedgerEntry({ ts: NOW - 60_000, status: 'error', confirmed: null })
+    ]
+    const snap = makeSnapshot({ session: makeBucket({ resetsAt: new Date(MOVED_MS) }) })
+    expect(reconcilePendingPings(entries, snap, NOW)).toEqual([])
+  })
+
+  it('produces nothing from a stale snapshot', () => {
+    const entries = [
+      makeLedgerEntry({ ts: NOW - 60_000, status: 'success', reason: 'session', resetsAtBeforeMs: BEFORE_MS, confirmed: null })
+    ]
+    const snap = makeSnapshot({ stale: true, session: makeBucket({ resetsAt: new Date(MOVED_MS) }) })
+    expect(reconcilePendingPings(entries, snap, NOW)).toEqual([])
   })
 })

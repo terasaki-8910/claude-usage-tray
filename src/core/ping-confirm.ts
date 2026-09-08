@@ -1,3 +1,5 @@
+import type { Bucket, LedgerEntry, Snapshot } from './types'
+
 /**
  * Decides whether a ping actually restarted a usage window.
  *
@@ -27,4 +29,53 @@ export function resetMoved(beforeMs: number | null, afterMs: number | null): boo
   // No window existed before and one exists now — that is a restart.
   if (beforeMs === null) return true
   return Math.abs(afterMs - beforeMs) >= MIN_RESET_MOVE_MS
+}
+
+/**
+ * How long to keep a ping's confirmation as "checking" before giving up
+ * and showing an honest "not confirmed" rather than spinning forever.
+ *
+ * There is no fixed refresh interval to wait out: measured directly, the
+ * local cache (`~/.claude.json`'s `cachedUsageUtilization`) went 20+
+ * minutes without updating after two consecutive real, billed, successful
+ * pings — with and without `--no-session-persistence`. A short
+ * poll-and-give-up window (originally 15s–120s) reported "unconfirmed" on
+ * data that simply had not been re-fetched yet, not on a failed ping.
+ */
+export const CONFIRM_GIVE_UP_AFTER_MS = 30 * 60_000
+
+export interface LedgerPatch {
+  ts: number
+  patch: { confirmed: boolean; resetsAtAfterMs: number | null }
+}
+
+/**
+ * Checks every not-yet-confirmed successful ping against a freshly read
+ * snapshot. Call this whenever the snapshot actually changes (not on a
+ * fixed timer) — confirmation happens opportunistically, whenever the
+ * underlying cache next refreshes, however long that takes. An entry
+ * already given up on (`confirmed: false`) can still be upgraded to
+ * `true` later if the delayed cache eventually catches up; the reverse
+ * never happens.
+ */
+export function reconcilePendingPings(
+  entries: readonly LedgerEntry[],
+  snapshot: Snapshot,
+  nowMs: number,
+  giveUpAfterMs: number = CONFIRM_GIVE_UP_AFTER_MS
+): LedgerPatch[] {
+  if (snapshot.stale) return []
+  const patches: LedgerPatch[] = []
+
+  for (const e of entries) {
+    if (e.status !== 'success' || e.confirmed === true) continue
+    const bucket: Bucket | null = snapshot[bucketKeyForReason(e.reason)]
+    const afterMs = bucket?.resetsAt?.getTime() ?? null
+    if (resetMoved(e.resetsAtBeforeMs, afterMs)) {
+      patches.push({ ts: e.ts, patch: { confirmed: true, resetsAtAfterMs: afterMs } })
+    } else if (e.confirmed === null && nowMs - e.ts > giveUpAfterMs) {
+      patches.push({ ts: e.ts, patch: { confirmed: false, resetsAtAfterMs: afterMs } })
+    }
+  }
+  return patches
 }

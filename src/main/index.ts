@@ -1,7 +1,7 @@
 import { app, ipcMain } from 'electron'
 import { bucketToDto } from '../core/usage-parser'
 import { checkGuards } from '../core/budget-guard'
-import { bucketKeyForReason, resetMoved } from '../core/ping-confirm'
+import { bucketKeyForReason, reconcilePendingPings } from '../core/ping-confirm'
 import { decide } from '../core/scheduler-logic'
 import type { Config, LedgerEntry, PopupState } from '../core/types'
 import { resolveClaudePath } from './claude-cli'
@@ -13,9 +13,6 @@ import { UsageStore } from './usage-store'
 import { PopupWindowManager } from './window-manager'
 
 const REFRESH_INTERVAL_MS = 5 * 60_000
-// Cache refresh was measured to be asynchronous with unknown latency after
-// a ping — poll a few times rather than assuming it lands immediately.
-const CONFIRM_POLL_DELAYS_MS = [15_000, 30_000, 60_000, 120_000]
 
 let config: Config = loadConfig()
 let tray: AppTray | null = null
@@ -24,15 +21,11 @@ let usageStore: UsageStore
 let ledger: Ledger
 let pingInFlight = false
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
-}
-
 function summarizeLedgerEntry(e: LedgerEntry): string {
   const when = new Date(e.ts).toLocaleTimeString()
   if (e.status === 'in-flight') return `${when} 実行中…`
   const cost = e.costUsd !== null ? `$${e.costUsd.toFixed(4)}` : '不明'
-  const outcome = e.isError ? 'エラー' : e.confirmed ? '成功(確認済)' : '成功(未確認)'
+  const outcome = e.isError ? 'エラー' : e.confirmed === true ? '成功(反映確認済)' : e.confirmed === false ? '成功(反映未確認)' : '成功(反映確認中)'
   return `${when} ${outcome} ${cost}`
 }
 
@@ -53,7 +46,11 @@ function buildPopupState(): PopupState {
     weeklyAll: bucketToDto(snap.weeklyAll),
     weeklyFable: bucketToDto(snap.weeklyFable),
     pingEnabled: config.pingEnabled,
-    lastPingSummary: last ? summarizeLedgerEntry(last) : null
+    lastPingSummary: last ? summarizeLedgerEntry(last) : null,
+    // Read live from the OS rather than mirrored into config.json — Electron
+    // already persists this at the OS level (registry Run key on Windows,
+    // a login-item entry on macOS), so a second copy could only drift.
+    openAtLogin: app.getLoginItemSettings().openAtLogin
   }
 }
 
@@ -101,33 +98,10 @@ async function firePing(reason: string): Promise<void> {
   })
   pingInFlight = false
   popup?.pushState()
-
-  void confirmPing(ts, reason)
-}
-
-/** Polls after a ping to confirm resetsAt actually moved — refresh was
- * measured to be asynchronous with unknown latency, so this does not
- * assume the cache is fresh the instant the CLI process exits. */
-async function confirmPing(ts: number, reason: string): Promise<void> {
-  const entry = ledger.getEntries().find((e) => e.ts === ts)
-  const beforeMs = entry?.resetsAtBeforeMs ?? null
-  const bucketKey = bucketKeyForReason(reason)
-
-  for (const delay of CONFIRM_POLL_DELAYS_MS) {
-    await sleep(delay)
-    const { changed } = usageStore.refresh()
-    if (!changed) continue
-    const snap = usageStore.getSnapshot()
-    const after = snap[bucketKey]
-    const afterMs = after?.resetsAt?.getTime() ?? null
-    const moved = resetMoved(beforeMs, afterMs)
-    ledger.updateByTs(ts, { resetsAtAfterMs: afterMs, confirmed: moved })
-    tray?.update(snap)
-    popup?.pushState()
-    if (moved) return
-  }
-  ledger.updateByTs(ts, { confirmed: false })
-  popup?.pushState()
+  // No follow-up polling loop here: confirmation happens opportunistically
+  // in tick(), whenever the snapshot next actually changes — see
+  // reconcilePendingPings for why a fixed poll-and-give-up window doesn't
+  // work for this cache.
 }
 
 /**
@@ -166,11 +140,17 @@ async function tick(manual = false): Promise<void> {
   const snap = usageStore.getSnapshot()
   tray?.update(snap)
 
+  // Runs every tick, not only when the file just changed — the give-up
+  // clause depends on elapsed wall-clock time, not on a change happening
+  // right now, and needs to fire even if the cache never refreshes again.
+  const patches = reconcilePendingPings(ledger.getEntries(), snap, Date.now())
+  for (const { ts, patch } of patches) ledger.updateByTs(ts, patch)
+
   const decision = decide(snap, ledger.getEntries(), config, new Date())
   if (decision.ping && !pingInFlight) {
     await firePing(decision.reason)
   }
-  if (changed || manual) {
+  if (changed || manual || patches.length > 0) {
     popup?.pushState()
   }
 }
@@ -204,6 +184,10 @@ app.whenReady().then(() => {
   ipcMain.handle('set-ping-enabled', (_event, enabled: unknown) => {
     config = { ...config, pingEnabled: Boolean(enabled) }
     saveConfig(config)
+    popup?.pushState()
+  })
+  ipcMain.handle('set-open-at-login', (_event, enabled: unknown) => {
+    app.setLoginItemSettings({ openAtLogin: Boolean(enabled) })
     popup?.pushState()
   })
   ipcMain.handle('run-ping-now', async () => {

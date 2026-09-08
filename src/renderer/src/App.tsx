@@ -42,6 +42,24 @@ function Row({ bucket }: { bucket: BucketDto }): preact.JSX.Element {
   )
 }
 
+/** Hover/focus-triggered explanation — keeps the default view to a single
+ * line instead of a permanent paragraph of helper text (ui.md: "over-
+ * explanation" via unconditional helper text is an explicitly forbidden
+ * pattern). Focus-triggered too, not just hover, so it's reachable without
+ * a mouse. */
+function InfoTip({ text }: { text: string }): preact.JSX.Element {
+  return (
+    <span class="info-tip">
+      <button type="button" class="info-tip-trigger" aria-label="説明">
+        ?
+      </button>
+      <span class="info-tip-bubble" role="tooltip">
+        {text}
+      </span>
+    </span>
+  )
+}
+
 function RefreshIcon({ spinning }: { spinning: boolean }): preact.JSX.Element {
   return (
     <svg
@@ -182,12 +200,19 @@ export function App(): preact.JSX.Element {
           />
           自動ping
           <span class="ping-state">{state.pingEnabled ? '有効' : '無効'}</span>
+          <InfoTip text="使用量の枠が切れたら、Haikuに最小の1往復(約$0.001)を自動送信して新しい枠を開始します。放置すると次に使った時点から枠が始まるため、リセット時刻が後ろへずれていくのを防ぎます。反映まで時間がかかることがあります。" />
         </label>
 
-        <p class="ping-explain">
-          使用量の枠が切れたら、Haikuに最小の1往復(約$0.001)を自動送信して新しい枠を開始します。
-          放置すると次に使った時点から枠が始まるため、リセット時刻が後ろへずれていくのを防ぐ機能です。
-        </p>
+        <label class="ping-toggle">
+          <input
+            type="checkbox"
+            checked={state.openAtLogin}
+            onChange={(e) => {
+              void window.api.setOpenAtLogin((e.target as HTMLInputElement).checked)
+            }}
+          />
+          ログイン時に起動
+        </label>
 
         <div class="ping-row">
           <span class="ping-stats">

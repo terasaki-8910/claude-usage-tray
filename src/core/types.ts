@@ -97,4 +97,5 @@ export interface PopupState {
   pingEnabled: boolean
   lastPingSummary: string | null
   pingStats: PingStats
+  openAtLogin: boolean
 }

@@ -14,6 +14,7 @@ const api = {
   getState: (): Promise<PopupState> => ipcRenderer.invoke('get-state'),
   requestRefresh: (): Promise<PopupState> => ipcRenderer.invoke('refresh'),
   setPingEnabled: (enabled: boolean): Promise<void> => ipcRenderer.invoke('set-ping-enabled', enabled),
+  setOpenAtLogin: (enabled: boolean): Promise<void> => ipcRenderer.invoke('set-open-at-login', enabled),
   /** Sends one ping immediately, regardless of the auto-ping switch —
    * used to verify the mechanism actually works without arming it. */
   runPingNow: (): Promise<{ ok: boolean; message: string }> => ipcRenderer.invoke('run-ping-now'),
