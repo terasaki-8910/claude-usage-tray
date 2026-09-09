@@ -8,7 +8,11 @@ declare global {
   }
 }
 
-const STALE_AFTER_MS = 30 * 60_000
+// The active refresh (usage-refresh.ts) runs every 2 minutes and on every
+// popup open, so data older than this means that refresh has been
+// failing, not just "hasn't happened yet" — a much shorter bar than
+// before it existed.
+const STALE_AFTER_MS = 10 * 60_000
 
 function formatAge(ms: number): string {
   const minutes = Math.floor(ms / 60_000)

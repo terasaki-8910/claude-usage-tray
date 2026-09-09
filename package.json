@@ -1,6 +1,6 @@
 {
   "name": "claude-usage-tray",
-  "version": "0.1.4",
+  "version": "0.1.6",
   "description": "Tray app that displays Claude usage-limit percentages and reactively pings to keep reset windows from drifting.",
   "private": true,
   "type": "module",
@@ -19,6 +19,7 @@
     "typecheck": "npm run typecheck:node && npm run typecheck:web"
   },
   "dependencies": {
+    "node-pty": "^1.1.0",
     "preact": "10.29.8"
   },
   "devDependencies": {
@@ -40,6 +41,10 @@
     "files": [
       "out/**/*"
     ],
+    "asarUnpack": [
+      "**/*.node"
+    ],
+    "npmRebuild": false,
     "afterPack": "build/after-pack.cjs",
     "publish": [
       {

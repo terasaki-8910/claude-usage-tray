@@ -19,8 +19,11 @@ const COLORS: Record<string, RgbaColor> = {
   unknown: [150, 150, 150, 255]
 }
 
-/** Past this age the cached numbers are too old to present as current. */
-const STALE_AFTER_MS = 30 * 60_000
+/** Past this age the cached numbers are too old to present as current.
+ * The active refresh (usage-refresh.ts) runs every 2 minutes and on every
+ * tray click, so anything older than this means that refresh has been
+ * failing, not just "hasn't happened yet". */
+const STALE_AFTER_MS = 10 * 60_000
 
 function colorForSeverity(severity: string | undefined): RgbaColor {
   return COLORS[severity ?? ''] ?? COLORS.unknown

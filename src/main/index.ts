@@ -1,4 +1,6 @@
 import { app, ipcMain } from 'electron'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { bucketToDto } from '../core/usage-parser'
 import { checkGuards } from '../core/budget-guard'
 import { bucketKeyForReason, reconcilePendingPings } from '../core/ping-confirm'
@@ -10,10 +12,18 @@ import { loadConfig, saveConfig } from './config-store'
 import { Ledger } from './ledger'
 import { runPing } from './ping-executor'
 import { AppTray } from './tray'
+import { refreshUsageViaInteractiveSession } from './usage-refresh'
 import { UsageStore } from './usage-store'
 import { PopupWindowManager } from './window-manager'
 
-const REFRESH_INTERVAL_MS = 5 * 60_000
+// Free (verified: interactive /usage renders "Total cost: $0.0000" — no
+// model call happens), so this can run far more often than the old
+// file-only poll. Still not instant-instant: each run boots a real
+// claude process (~3-5s observed), so this is a floor on responsiveness,
+// not a cost concern.
+const REFRESH_INTERVAL_MS = 2 * 60_000
+const REFRESH_SCRATCH_DIR = join(tmpdir(), 'usagetray-refresh-scratch')
+let refreshInFlight = false
 
 let config: Config = loadConfig()
 let tray: AppTray | null = null
@@ -136,7 +146,29 @@ async function runPingNow(): Promise<{ ok: boolean; message: string }> {
   return { ok: true, message: `送信しました ($${(entry.costUsd ?? 0).toFixed(4)})` }
 }
 
+/**
+ * Drives the free interactive-`/usage` refresh (see usage-refresh.ts),
+ * then re-reads the now-hopefully-fresh cache file. Guarded by
+ * `refreshInFlight` so overlapping calls (periodic tick + a manual click
+ * landing at the same moment) don't spawn two `claude` processes at
+ * once. Failure is silent by design — the file-only read this falls back
+ * to, plus the session-reset estimate, are the existing degraded path.
+ */
+async function activeRefresh(): Promise<void> {
+  if (refreshInFlight) return
+  refreshInFlight = true
+  try {
+    const claudePath = resolveClaudePath()
+    if (claudePath) {
+      await refreshUsageViaInteractiveSession(claudePath, REFRESH_SCRATCH_DIR)
+    }
+  } finally {
+    refreshInFlight = false
+  }
+}
+
 async function tick(manual = false): Promise<void> {
+  await activeRefresh()
   const { changed } = usageStore.refresh()
   const snap = usageStore.getSnapshot()
   tray?.update(snap)
@@ -173,7 +205,12 @@ app.whenReady().then(() => {
   ledger = new Ledger()
   popup = new PopupWindowManager(buildPopupState)
   tray = new AppTray(
-    () => popup?.toggle(tray!.getBounds()),
+    () => {
+      popup?.toggle(tray!.getBounds())
+      // Pull fresh data the moment the user actually looks, rather than
+      // waiting for the next scheduled tick — free, so no reason not to.
+      void tick(true)
+    },
     () => app.quit()
   )
 
