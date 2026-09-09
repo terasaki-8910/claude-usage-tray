@@ -37,7 +37,18 @@ function Row({ bucket }: { bucket: BucketDto }): preact.JSX.Element {
         <span class="row-label">{bucket.label}</span>
         <span class={`row-percent sev-${bucket.severity}`}>{bucket.percent}%</span>
       </div>
-      <div class="row-reset">{formatReset(bucket.resetsAtIso)}</div>
+      <div class="row-reset">
+        {formatReset(bucket.resetsAtIso)}
+        {bucket.resetsAtEstimated && (
+          <>
+            {' '}
+            <span class="estimated-tag">
+              推定
+              <InfoTip text="このPCの使用量データがまだ更新されていないため確定値が取得できません。直近の送信から5時間後として計算した見込み値です。実際の値に更新され次第、この表示は消えます。" />
+            </span>
+          </>
+        )}
+      </div>
     </div>
   )
 }

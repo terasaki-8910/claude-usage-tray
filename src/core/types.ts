@@ -78,6 +78,11 @@ export interface BucketDto {
   severity: string
   resetsAtIso: string | null
   label: string
+  /** True when resetsAtIso is a projection (last successful ping + the
+   * known 5h window), not confirmed server data — the local usage cache
+   * has no reliable refresh trigger and can go hours without updating.
+   * Must always be shown distinguished from confirmed data. */
+  resetsAtEstimated?: boolean
 }
 
 export interface PingStats {

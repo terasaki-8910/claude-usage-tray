@@ -2,6 +2,7 @@ import { app, ipcMain } from 'electron'
 import { bucketToDto } from '../core/usage-parser'
 import { checkGuards } from '../core/budget-guard'
 import { bucketKeyForReason, reconcilePendingPings } from '../core/ping-confirm'
+import { applySessionEstimate } from '../core/reset-estimate'
 import { decide } from '../core/scheduler-logic'
 import type { Config, LedgerEntry, PopupState } from '../core/types'
 import { resolveClaudePath } from './claude-cli'
@@ -42,7 +43,7 @@ function buildPopupState(): PopupState {
     },
     fetchedAtMs: snap.fetchedAtMs,
     stale: snap.stale,
-    session: bucketToDto(snap.session),
+    session: applySessionEstimate(bucketToDto(snap.session), entries, Date.now()),
     weeklyAll: bucketToDto(snap.weeklyAll),
     weeklyFable: bucketToDto(snap.weeklyFable),
     pingEnabled: config.pingEnabled,
