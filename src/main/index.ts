@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { bucketToDto } from '../core/usage-parser'
 import { checkGuards } from '../core/budget-guard'
+import { dedupeInFlight } from '../core/dedupe-in-flight'
 import { bucketKeyForReason, reconcilePendingPings } from '../core/ping-confirm'
 import { applySessionEstimate } from '../core/reset-estimate'
 import { decide } from '../core/scheduler-logic'
@@ -23,7 +24,6 @@ import { PopupWindowManager } from './window-manager'
 // not a cost concern.
 const REFRESH_INTERVAL_MS = 2 * 60_000
 const REFRESH_SCRATCH_DIR = join(tmpdir(), 'usagetray-refresh-scratch')
-let refreshInFlight = false
 
 let config: Config = loadConfig()
 let tray: AppTray | null = null
@@ -148,24 +148,23 @@ async function runPingNow(): Promise<{ ok: boolean; message: string }> {
 
 /**
  * Drives the free interactive-`/usage` refresh (see usage-refresh.ts),
- * then re-reads the now-hopefully-fresh cache file. Guarded by
- * `refreshInFlight` so overlapping calls (periodic tick + a manual click
- * landing at the same moment) don't spawn two `claude` processes at
- * once. Failure is silent by design — the file-only read this falls back
- * to, plus the session-reset estimate, are the existing degraded path.
+ * then re-reads the now-hopefully-fresh cache file. Wrapped in
+ * dedupeInFlight so overlapping calls (periodic tick + a manual click
+ * landing at the same moment) share the one in-flight run rather than
+ * spawning two `claude` processes — and rather than the second caller
+ * skipping its refresh entirely, which used to make a manual "今すぐ更新"
+ * click complete near-instantly with unchanged data whenever it landed
+ * during the background tick (see dedupe-in-flight.ts for the regression
+ * test). Failure is silent by design — the file-only read this falls
+ * back to, plus the session-reset estimate, are the existing degraded
+ * path.
  */
-async function activeRefresh(): Promise<void> {
-  if (refreshInFlight) return
-  refreshInFlight = true
-  try {
-    const claudePath = resolveClaudePath()
-    if (claudePath) {
-      await refreshUsageViaInteractiveSession(claudePath, REFRESH_SCRATCH_DIR)
-    }
-  } finally {
-    refreshInFlight = false
+const activeRefresh = dedupeInFlight(async (): Promise<void> => {
+  const claudePath = resolveClaudePath()
+  if (claudePath) {
+    await refreshUsageViaInteractiveSession(claudePath, REFRESH_SCRATCH_DIR)
   }
-}
+})
 
 async function tick(manual = false): Promise<void> {
   await activeRefresh()

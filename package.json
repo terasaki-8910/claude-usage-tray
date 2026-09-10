@@ -1,6 +1,6 @@
 {
   "name": "claude-usage-tray",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Tray app that displays Claude usage-limit percentages and reactively pings to keep reset windows from drifting.",
   "private": true,
   "type": "module",
