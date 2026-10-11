@@ -77,7 +77,7 @@ jobs:
             --notes "$(cat <<'NOTES'
           ## インストール
 
-          - **Windows**: `Claude-Usage-Tray-Setup-x.y.z.exe` を実行
+          - **Windows**: `UsageTray-Setup-x.y.z.exe` を実行
           - **macOS**: Apple Silicon は `-arm64.dmg`、Intel は `-x64.dmg`
 
           ### macOS の初回起動について
